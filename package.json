@@ -1,0 +1,17 @@
+{
+  "name": "glsl-multi-layer-vj",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GLSL Multi-layer VJ System",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs --watch",
+    "serve": "npx serve -l 3000 ."
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  },
+  "dependencies": {
+    "three": "0.150.0"
+  }
+}
