@@ -10,7 +10,6 @@ const config = {
   platform: 'browser',
   target: ['es2020'],
   sourcemap: true,
-  external: ['three'],
   define: {
     'process.env.NODE_ENV': isWatch ? '"development"' : '"production"',
   },
