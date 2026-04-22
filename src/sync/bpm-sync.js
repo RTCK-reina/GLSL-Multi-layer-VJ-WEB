@@ -32,6 +32,23 @@ export class BpmSync {
 
         // Scene manager injected after construction
         this._sceneManager = null;
+
+        // MIDI Clock listeners
+        bus.on('midi:clock-tick', ({ bpm }) => {
+            if (!this._state.midi.clock.enabled) return;
+            this.setBpm(bpm, { resetPhase: false, keepTapHistory: true });
+            if (this._bpmInputEl) this._bpmInputEl.disabled = true;
+        });
+        bus.on('midi:clock-start', () => {
+            if (!this._state.midi.clock.enabled) return;
+            this.resetBeatPhase();
+            this.setBeatRunning(true);
+        });
+        bus.on('midi:clock-stop', () => {
+            if (!this._state.midi.clock.enabled) return;
+            this.setBeatRunning(false);
+        });
+        bus.on('bpm:tap', () => this.tapTempo());
     }
 
     /** Inject scene manager (avoids circular dependency). */
@@ -130,11 +147,15 @@ export class BpmSync {
     refreshBpmUI() {
         const s = this._state;
         const runToggle = document.getElementById('beat-run-toggle');
+        const clockOn = s.midi && s.midi.clock && s.midi.clock.enabled;
         if (this._bpmInputEl && document.activeElement !== this._bpmInputEl) {
             this._bpmInputEl.value = s.bpm.toFixed(1);
+            this._bpmInputEl.disabled = !!clockOn;
+            this._bpmInputEl.title = clockOn ? 'BPM driven by MIDI Clock' : '';
         }
         if (this._bpmDisplayEl) {
-            this._bpmDisplayEl.textContent = `${s.bpm.toFixed(1)} BPM${s.bpmRunning ? '' : ' (PAUSE)'}`;
+            const src = clockOn ? ' ⧗MIDI' : '';
+            this._bpmDisplayEl.textContent = `${s.bpm.toFixed(1)} BPM${s.bpmRunning ? '' : ' (PAUSE)'}${src}`;
         }
         if (runToggle) runToggle.checked = s.bpmRunning;
     }

@@ -20,6 +20,8 @@ import { AudioAnalyzer } from './audio/audio-analyzer.js';
 import { Renderer } from './renderer/renderer.js';
 import { BpmSync } from './sync/bpm-sync.js';
 import { MidiManager } from './midi/midi-manager.js';
+import { MidiBindings } from './midi/midi-bindings.js';
+import { MidiConfigUI } from './midi/midi-config-ui.js';
 import { LayerManager } from './layer/layer-manager.js';
 import { SceneManager } from './scene/scene-manager.js';
 import { EditorController } from './editor/editor-controller.js';
@@ -53,6 +55,8 @@ function boot() {
 
     // ── 3. Modules with cross-module deps ────────────────────
     const midiManager = new MidiManager(bus, state);
+    const midiBindings = new MidiBindings(bus, state);
+    midiManager.setBindings(midiBindings);
 
     const layerManager = new LayerManager(bus, state, {
         renderer,
@@ -81,6 +85,11 @@ function boot() {
         undoManager
     });
 
+    const midiConfigUI = new MidiConfigUI(bus, state, {
+        midiManager,
+        bindings: midiBindings
+    });
+
     const uiController = new UIController(bus, state, {
         renderer,
         layerManager,
@@ -89,6 +98,7 @@ function boot() {
         bpmSync,
         projectIO,
         midiManager,
+        midiConfigUI,
         audio
     });
 
@@ -99,11 +109,33 @@ function boot() {
     debugPanel.installGlobalErrorHooks();
     sceneManager.initUI();
     projectIO.initImportUI();
+    midiConfigUI.initUI();
     uiController.initUI();
 
     // ── 5. Init MIDI (audio is user-triggered via MIC/SYS buttons) ──
+    midiManager._loadDevicePrefs();
     midiManager.init();
     midiManager.initLearnUI();
+
+    // ── 5b. App-level live-state listeners ───────────────────
+    bus.on('app:blackout', ({ active }) => {
+        state.blackout = !!active;
+        const label = document.getElementById('blackout-label');
+        const btn = document.getElementById('blackout-btn');
+        if (label) label.classList.toggle('hidden', !state.blackout);
+        if (btn) {
+            btn.classList.toggle('bg-red-900', !!state.blackout);
+            btn.classList.toggle('text-red-200', !!state.blackout);
+            btn.classList.toggle('border-red-600', !!state.blackout);
+            btn.classList.toggle('text-slate-500', !state.blackout);
+            btn.classList.toggle('border-slate-700', !state.blackout);
+        }
+    });
+    bus.on('app:panic', () => midiManager.panic());
+    bus.on('crossfade:mix', ({ mix }) => {
+        // Direct crossfade mix override from a MIDI fader — only meaningful while a crossfade is active.
+        if (state.crossfade.active) state.crossfade.mix = Math.max(0, Math.min(1, mix));
+    });
 
     // ── 6. Restore project or create default scene ───────────
     if (!projectIO.restoreFromStorage()) {

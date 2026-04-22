@@ -23,6 +23,7 @@ export class UIController {
         this._bpmSync = deps.bpmSync;
         this._projectIO = deps.projectIO;
         this._midiManager = deps.midiManager;
+        this._midiConfigUI = deps.midiConfigUI;
         this._audio = deps.audio;
     }
 
@@ -101,6 +102,12 @@ export class UIController {
         });
 
         this._buildShaderAccordion(hideModal);
+
+        // --- Blackout button ---
+        const blackoutBtn = document.getElementById('blackout-btn');
+        if (blackoutBtn) {
+            blackoutBtn.onclick = () => this._bus.emit('app:blackout', { active: !this._state.blackout, source: 'ui' });
+        }
 
         // --- Global Shortcuts ---
         this._initGlobalShortcuts(hideModal);
@@ -309,11 +316,47 @@ export class UIController {
                 return;
             }
 
+            // 1-9 — scene recall, 0 — blackout toggle
+            if (!ctrlOrMeta && !e.altKey && !isTextInput
+                && !this._sceneManager.isModalOpen('code-modal')
+                && !this._sceneManager.isModalOpen('shader-modal')
+                && !(this._midiConfigUI && this._midiConfigUI.isOpen())) {
+                if (/^[1-9]$/.test(key)) {
+                    e.preventDefault();
+                    const idx = parseInt(key, 10) - 1;
+                    if (idx < this._state.scenes.length) this._bus.emit('scene:recall', { index: idx });
+                    return;
+                }
+                if (key === '0') {
+                    e.preventDefault();
+                    this._bus.emit('app:blackout', { active: !this._state.blackout, source: 'key' });
+                    return;
+                }
+                if (key === 'b') {
+                    e.preventDefault();
+                    if (e.shiftKey) this._bus.emit('app:panic', {});
+                    else this._bus.emit('app:blackout', { active: !this._state.blackout, source: 'key' });
+                    return;
+                }
+            }
+
             // Escape — cancel MIDI Learn first, then close modals
             if (e.key === 'Escape') {
                 if (this._state.midi.learn.active) {
                     e.preventDefault();
                     this._midiManager.cancelLearn();
+                    return;
+                }
+                const bindingEditor = document.getElementById('midi-binding-editor');
+                if (bindingEditor && !bindingEditor.classList.contains('hidden')) {
+                    e.preventDefault();
+                    bindingEditor.classList.add('opacity-0');
+                    setTimeout(() => bindingEditor.classList.add('hidden'), 150);
+                    return;
+                }
+                if (this._midiConfigUI && this._midiConfigUI.isOpen()) {
+                    e.preventDefault();
+                    this._midiConfigUI.close();
                     return;
                 }
                 if (this._sceneManager.isModalOpen('code-modal') && this._editorController.editorClose) {

@@ -4,11 +4,26 @@
  * Each layer has a ShaderMaterial, RenderTarget, uniform definitions,
  * and optional feedback buffer (FBO).
  *
+ * Live flags on a layer:
+ *   muted:  boolean — compositor skips this layer when true
+ *   active: boolean — UI selection (only one layer is active at a time)
+ *
  * Events emitted:
  *   project:autosave  (queued after changes)
- *   toast              { msg, type }
+ *   toast             { msg, type }
+ *   layer:select      { layerId, source } (when UI selects a layer)
+ *
+ * Events consumed:
+ *   layer:mute       { layerId, value, source }
+ *   layer:solo       { layerId, source }  (null = clear solo)
+ *   layer:select     { layerId, source }
+ *   layer:opacity    { layerId, value }
+ *   layer:blend-step { layerId, delta }
+ *   uniform:set      { layerId, uKey, norm }
  */
 const THREE = window.THREE;
+
+const BLEND_NAMES = ['NORMAL','ADD','MULTIPLY','SCREEN','DIFFERENCE','OVERLAY','SOFT_LIGHT','HARD_LIGHT','COLOR_DODGE','COLOR_BURN'];
 
 export class LayerManager {
     /**
@@ -22,6 +37,17 @@ export class LayerManager {
         this._renderer = deps.renderer;
         this._midiManager = deps.midiManager;
 
+        this._bindEvents();
+    }
+
+    _bindEvents() {
+        const bus = this._bus;
+        bus.on('layer:mute', ({ layerId, value }) => this.setMute(layerId, value));
+        bus.on('layer:solo', ({ layerId }) => this.toggleSolo(layerId));
+        bus.on('layer:select', ({ layerId }) => this.selectLayer(layerId));
+        bus.on('layer:opacity', ({ layerId, value }) => this.setOpacity(layerId, value));
+        bus.on('layer:blend-step', ({ layerId, delta }) => this.stepBlend(layerId, delta));
+        bus.on('uniform:set', ({ layerId, uKey, norm }) => this.setUniformNorm(layerId, uKey, norm));
     }
 
     generateLayerId() {
@@ -54,74 +80,7 @@ export class LayerManager {
         return { ...fallback, ...primary };
     }
 
-    /**
-     * Add a layer from a shader key and optional saved config.
-     * @param {string} key
-     * @param {Object|null} config
-     * @returns {Object|null} layer
-     */
-    addLayer(key, config = null, options = {}) {
-        const def = window.SHADERS[key];
-        if (!def) {
-            this._bus.emit('toast', { msg: `Unknown shader key: ${key}`, type: 'error' });
-            return null;
-        }
-        if (def.isWebCam) this._renderer.initWebCam();
-
-        const s = this._state;
-        const uniformDefs = this.sanitizeUniformsDef(
-            config && config.uniformsDef ? config.uniformsDef : def.uniforms,
-            def.uniforms
-        );
-
-        const id = (config && typeof config.id === 'string' && config.id) ? config.id : this.generateLayerId();
-        const blendRaw = config ? Number(config.blend) : 0;
-        const opacityRaw = config ? Number(config.opacity) : 1.0;
-
-        const layer = {
-            id, key, name: def.name,
-            blend: Number.isFinite(blendRaw) ? Math.max(0, Math.min(9, Math.round(blendRaw))) : 0,
-            opacity: Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1.0,
-            needsInput: def.needsInput, isFeedback: def.isFeedback, isWebCam: def.isWebCam,
-            fragmentShader: (config && typeof config.fragmentShader === 'string') ? config.fragmentShader : def.fragmentShader,
-            uniformsDef: uniformDefs,
-            uniforms: {
-                u_time: { value: 0 },
-                u_resolution: { value: new THREE.Vector2(s.width, s.height) },
-                u_bass: { value: 0 }, u_mid: { value: 0 }, u_treble: { value: 0 },
-                u_bpm: { value: s.bpm }, u_beat: { value: 0 }, u_phase: { value: 0 },
-                u_inputTexture: { value: null }, u_webcamTexture: { value: null }, u_prevLayer: { value: null }
-            },
-            renderTarget: this._renderer.createRenderTarget(),
-            fbo: def.isFeedback ? this._renderer.createRenderTarget() : null
-        };
-
-        // Init uniform values
-        Object.keys(uniformDefs).forEach(k => {
-            let val;
-            if (config && config.uniformValues && config.uniformValues[k] !== undefined) {
-                const configVal = Number(config.uniformValues[k]);
-                const min = uniformDefs[k].min;
-                const max = uniformDefs[k].max;
-                val = Number.isFinite(configVal) ? Math.min(max, Math.max(min, configVal)) : uniformDefs[k].value;
-            } else {
-                val = uniformDefs[k].value;
-            }
-            layer.uniforms[k] = { value: val };
-        });
-
-        layer.material = this._renderer.createLayerMaterial(layer.uniforms, layer.fragmentShader);
-        s.layers.push(layer);
-        this.renderLayerUI(layer);
-        if (!options.skipSave) this.queueSceneSave();
-        return layer;
-    }
-
-    /**
-     * Build a layer object without adding to state.layers or rendering UI.
-     * Used for crossfade scene B layers.
-     */
-    buildLayerNoUI(key, config = null) {
+    _createLayerBase(key, config) {
         const def = window.SHADERS[key];
         if (!def) return null;
         if (def.isWebCam) this._renderer.initWebCam();
@@ -140,6 +99,8 @@ export class LayerManager {
             id, key, name: def.name,
             blend: Number.isFinite(blendRaw) ? Math.max(0, Math.min(9, Math.round(blendRaw))) : 0,
             opacity: Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1.0,
+            muted: !!(config && config.muted),
+            active: false,
             needsInput: def.needsInput, isFeedback: def.isFeedback, isWebCam: def.isWebCam,
             fragmentShader: (config && typeof config.fragmentShader === 'string') ? config.fragmentShader : def.fragmentShader,
             uniformsDef: uniformDefs,
@@ -173,11 +134,30 @@ export class LayerManager {
         return layer;
     }
 
+    addLayer(key, config = null, options = {}) {
+        const def = window.SHADERS[key];
+        if (!def) {
+            this._bus.emit('toast', { msg: `Unknown shader key: ${key}`, type: 'error' });
+            return null;
+        }
+        const layer = this._createLayerBase(key, config);
+        if (!layer) return null;
+        this._state.layers.push(layer);
+        this.renderLayerUI(layer);
+        if (!options.skipSave) this.queueSceneSave();
+        return layer;
+    }
+
+    buildLayerNoUI(key, config = null) {
+        return this._createLayerBase(key, config);
+    }
+
     removeLayer(layer, el = null) {
         const s = this._state;
         s.layers = s.layers.filter(l => l !== layer);
         if (el) el.remove();
         this._midiManager.cleanupMidiForLayer(layer);
+        if (s.soloLayerId === layer.id) s.soloLayerId = null;
         layer.material.dispose();
         layer.renderTarget.dispose();
         if (layer.fbo) layer.fbo.dispose();
@@ -188,6 +168,96 @@ export class LayerManager {
         this._bus.emit('project:autosave');
     }
 
+    // ---------- Live state setters ----------
+
+    setMute(layerId, value) {
+        const layer = this._state.layers.find(l => l.id === layerId);
+        if (!layer) return;
+        layer.muted = !!value;
+        this._refreshLayerCardState(layer);
+        this.queueSceneSave();
+    }
+
+    toggleSolo(layerId) {
+        const s = this._state;
+        // null → clear solo
+        if (layerId == null) {
+            s.soloLayerId = null;
+            this._refreshAllCards();
+            return;
+        }
+        s.soloLayerId = s.soloLayerId === layerId ? null : layerId;
+        this._refreshAllCards();
+    }
+
+    selectLayer(layerId) {
+        const s = this._state;
+        s.layers.forEach(l => { l.active = (l.id === layerId); });
+        this._refreshAllCards();
+    }
+
+    setOpacity(layerId, norm) {
+        const layer = this._state.layers.find(l => l.id === layerId);
+        if (!layer) return;
+        layer.opacity = Math.max(0, Math.min(1, norm));
+        const card = this._findCard(layerId);
+        if (card) {
+            const slider = card.querySelector('.layer-opacity');
+            const v = card.querySelector('.layer-opacity-val');
+            if (slider) slider.value = layer.opacity;
+            if (v) v.textContent = layer.opacity.toFixed(2);
+        }
+        this.queueSceneSave();
+    }
+
+    stepBlend(layerId, delta) {
+        const layer = this._state.layers.find(l => l.id === layerId);
+        if (!layer) return;
+        layer.blend = (((layer.blend + delta) % BLEND_NAMES.length) + BLEND_NAMES.length) % BLEND_NAMES.length;
+        const card = this._findCard(layerId);
+        if (card) {
+            const blend = card.querySelector('.layer-blend');
+            if (blend) blend.value = BLEND_NAMES[layer.blend];
+        }
+        this.queueSceneSave();
+    }
+
+    setUniformNorm(layerId, uKey, norm) {
+        const layer = this._state.layers.find(l => l.id === layerId);
+        if (!layer || !layer.uniformsDef[uKey] || !layer.uniforms[uKey]) return;
+        const def = layer.uniformsDef[uKey];
+        const v = def.min + norm * (def.max - def.min);
+        layer.uniforms[uKey].value = v;
+        const slider = document.getElementById(`slider-${layer.id}::${uKey}`);
+        if (slider) {
+            slider.value = v;
+            const valDisplay = slider.previousElementSibling && slider.previousElementSibling.lastElementChild;
+            if (valDisplay) valDisplay.textContent = v.toFixed(2);
+        }
+        this.queueSceneSave();
+    }
+
+    _findCard(layerId) {
+        return document.querySelector(`.layer-card[data-id="${layerId}"]`);
+    }
+
+    _refreshLayerCardState(layer) {
+        const card = this._findCard(layer.id);
+        if (!card) return;
+        card.classList.toggle('layer-muted', !!layer.muted);
+        const muteBtn = card.querySelector('.layer-mute-btn');
+        if (muteBtn) muteBtn.classList.toggle('layer-flag-on', !!layer.muted);
+        const soloBtn = card.querySelector('.layer-solo-btn');
+        if (soloBtn) soloBtn.classList.toggle('layer-flag-on', this._state.soloLayerId === layer.id);
+        card.classList.toggle('active', !!layer.active);
+    }
+
+    _refreshAllCards() {
+        this._state.layers.forEach(l => this._refreshLayerCardState(l));
+    }
+
+    // ---------- UI rendering ----------
+
     renderLayerUI(layer, options = {}) {
         const tpl = document.getElementById('layer-ui-template');
         const el = tpl.content.cloneNode(true).firstElementChild;
@@ -195,6 +265,31 @@ export class LayerManager {
         el.querySelector('.layer-name').textContent = layer.name;
         el.querySelector('.layer-type').textContent = layer.needsInput ? 'FX' : 'GEN';
         el.querySelector('.layer-type').className = `text-[9px] px-1.5 py-0.5 rounded font-mono font-bold tracking-wider ${layer.needsInput ? 'bg-indigo-900 text-indigo-300' : 'bg-emerald-900 text-emerald-300'}`;
+
+        // Click to select active layer
+        el.addEventListener('click', (e) => {
+            // Avoid swallowing interactive children
+            if (e.target.closest('input, button, select, .control-slider')) return;
+            this._bus.emit('layer:select', { layerId: layer.id, source: 'ui' });
+        });
+
+        // Mute / Solo buttons
+        const muteBtn = el.querySelector('.layer-mute-btn');
+        const soloBtn = el.querySelector('.layer-solo-btn');
+        if (muteBtn) {
+            muteBtn.classList.toggle('layer-flag-on', !!layer.muted);
+            muteBtn.onclick = (e) => {
+                e.stopPropagation();
+                this._bus.emit('layer:mute', { layerId: layer.id, value: !layer.muted, source: 'ui' });
+            };
+        }
+        if (soloBtn) {
+            soloBtn.classList.toggle('layer-flag-on', this._state.soloLayerId === layer.id);
+            soloBtn.onclick = (e) => {
+                e.stopPropagation();
+                this._bus.emit('layer:solo', { layerId: layer.id, source: 'ui' });
+            };
+        }
 
         // Opacity
         const op = el.querySelector('.layer-opacity');
@@ -209,18 +304,21 @@ export class LayerManager {
 
         // Blend
         const blend = el.querySelector('.layer-blend');
-        const blends = { 'NORMAL': 0, 'ADD': 1, 'MULTIPLY': 2, 'SCREEN': 3, 'DIFFERENCE': 4, 'OVERLAY': 5, 'SOFT_LIGHT': 6, 'HARD_LIGHT': 7, 'COLOR_DODGE': 8, 'COLOR_BURN': 9 };
-        Object.keys(blends).forEach(k => { if (blends[k] === layer.blend) blend.value = k; });
+        BLEND_NAMES.forEach((k, i) => { if (i === layer.blend) blend.value = k; });
         blend.onchange = (e) => {
-            layer.blend = blends[e.target.value];
+            layer.blend = BLEND_NAMES.indexOf(e.target.value);
             this.queueSceneSave();
         };
 
         // Remove
-        el.querySelector('.layer-del-btn').onclick = () => this.removeLayer(layer, el);
+        el.querySelector('.layer-del-btn').onclick = (e) => {
+            e.stopPropagation();
+            this.removeLayer(layer, el);
+        };
 
         // Code edit
-        el.querySelector('.layer-edit-btn').onclick = () => {
+        el.querySelector('.layer-edit-btn').onclick = (e) => {
+            e.stopPropagation();
             this._bus.emit('editor:open', { layer });
         };
 
@@ -242,7 +340,7 @@ export class LayerManager {
             valDisplay.className = 'text-[9px] text-slate-400';
             valDisplay.textContent = layer.uniforms[uKey].value.toFixed(2);
 
-            // MIDI CC input
+            // MIDI CC input (legacy map — still supported)
             const cc = document.createElement('input');
             cc.type = 'number';
             cc.placeholder = 'CC';
@@ -286,6 +384,7 @@ export class LayerManager {
                 this._state.midi.map[mapKey] = v;
                 this.queueSceneSave();
             };
+            cc.onclick = (e) => e.stopPropagation();
 
             head.append(label, cc, valDisplay);
 
@@ -313,6 +412,10 @@ export class LayerManager {
             wrap.append(head, slider);
             cont.appendChild(wrap);
         });
+
+        // Initial state classes
+        el.classList.toggle('layer-muted', !!layer.muted);
+        el.classList.toggle('active', !!layer.active);
 
         const stack = document.getElementById('layer-stack');
         if (options.replaceEl && options.replaceEl.parentElement === stack) {

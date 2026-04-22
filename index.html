@@ -64,6 +64,12 @@
             <button id="midi-learn-btn" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-500 px-3 py-1.5 rounded font-bold transition-colors border border-slate-700" title="MIDI Learn: click then move a slider, then turn a MIDI knob">
                 LEARN
             </button>
+            <button id="midi-config-btn" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 px-2 py-1.5 rounded font-bold transition-colors border border-slate-700" title="MIDI Configuration">
+                &#9881;
+            </button>
+            <button id="blackout-btn" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-500 px-3 py-1.5 rounded font-bold transition-colors border border-slate-700" title="Blackout output (B)">
+                BLACKOUT
+            </button>
             <button id="debug-toggle-btn" class="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded font-bold transition-colors border border-slate-700">
                 DEBUG
             </button>
@@ -168,6 +174,7 @@
             <div class="flex-1 relative flex items-center justify-center bg-[#050505] overflow-hidden group">
                 <div class="absolute inset-0 opacity-20 pointer-events-none" style="background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 40px 40px;"></div>
                 <canvas id="main-canvas" class="shadow-2xl shadow-black max-w-full max-h-full object-contain"></canvas>
+                <div id="blackout-label" class="hidden absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded bg-red-900/70 border border-red-500 text-red-200 text-[10px] font-bold tracking-widest pointer-events-none">● BLACKOUT</div>
             </div>
 
             <!-- Layer Stack -->
@@ -229,6 +236,149 @@
         </div>
     </div>
 
+    <!-- MIDI Configuration Modal -->
+    <div id="midi-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md hidden opacity-0 transition-opacity duration-200">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col transform scale-95 transition-transform duration-200 modal-content overflow-hidden">
+            <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-950">
+                <div class="flex items-center gap-4">
+                    <h2 class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-300 to-cyan-300">MIDI Configuration</h2>
+                    <div id="midi-monitor-indicator" class="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                        <span id="midi-activity-dot" class="w-1.5 h-1.5 rounded-full bg-slate-700 transition-colors"></span>
+                        <span id="midi-activity-text">idle</span>
+                    </div>
+                </div>
+                <button id="midi-modal-close" class="text-slate-500 hover:text-white text-2xl leading-none transition-colors">&times;</button>
+            </div>
+            <div class="flex border-b border-slate-700 bg-slate-950">
+                <button class="midi-tab px-4 py-3 text-[11px] font-bold tracking-wider text-slate-400 hover:text-white border-b-2 border-transparent data-[active=true]:text-purple-300 data-[active=true]:border-purple-400" data-tab="mappings" data-active="true">MAPPINGS</button>
+                <button class="midi-tab px-4 py-3 text-[11px] font-bold tracking-wider text-slate-400 hover:text-white border-b-2 border-transparent data-[active=true]:text-purple-300 data-[active=true]:border-purple-400" data-tab="devices" data-active="false">DEVICES</button>
+                <button class="midi-tab px-4 py-3 text-[11px] font-bold tracking-wider text-slate-400 hover:text-white border-b-2 border-transparent data-[active=true]:text-purple-300 data-[active=true]:border-purple-400" data-tab="clock" data-active="false">CLOCK / SYNC</button>
+                <button class="midi-tab px-4 py-3 text-[11px] font-bold tracking-wider text-slate-400 hover:text-white border-b-2 border-transparent data-[active=true]:text-purple-300 data-[active=true]:border-purple-400" data-tab="actions" data-active="false">GLOBAL</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5 bg-slate-900">
+                <!-- Mappings Tab -->
+                <section id="midi-tab-mappings" class="midi-tab-content">
+                    <div class="flex justify-between items-center mb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-[11px] font-bold text-slate-300">Bindings</span>
+                            <select id="midi-mappings-filter" class="bg-slate-950 border border-slate-800 text-[10px] text-slate-400 rounded px-2 py-1">
+                                <option value="all">All</option>
+                                <option value="scene">Scene</option>
+                                <option value="layer">Layer</option>
+                                <option value="uniform">Uniform</option>
+                                <option value="global">Global</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="midi-add-mapping-btn" class="text-[10px] bg-purple-600 hover:bg-purple-500 text-white font-bold px-3 py-1.5 rounded transition-colors">+ ADD</button>
+                            <button id="midi-learn-any-btn" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3 py-1.5 rounded transition-colors">LEARN → ADD</button>
+                        </div>
+                    </div>
+                    <table class="w-full text-[10px]">
+                        <thead class="sticky top-0 bg-slate-900 text-[9px] text-slate-500 uppercase tracking-wider">
+                            <tr class="border-b border-slate-800">
+                                <th class="text-left py-2 px-2">MIDI</th>
+                                <th class="text-left py-2 px-2">Action</th>
+                                <th class="text-left py-2 px-2">Target</th>
+                                <th class="text-left py-2 px-2">Behavior</th>
+                                <th class="text-left py-2 px-2">Label</th>
+                                <th class="w-20"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="midi-mappings-body" class="text-slate-300"></tbody>
+                    </table>
+                    <div id="midi-mappings-empty" class="hidden py-12 text-center text-[11px] text-slate-500">
+                        No bindings yet. Press <kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">+ ADD</kbd> or <kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">LEARN → ADD</kbd>.
+                    </div>
+                </section>
+                <!-- Devices Tab -->
+                <section id="midi-tab-devices" class="midi-tab-content hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-[11px] font-bold text-slate-300">Input Devices</span>
+                        <span class="text-[9px] text-slate-500">Disabled devices are ignored by this app.</span>
+                    </div>
+                    <div id="midi-devices-list" class="space-y-2"></div>
+                    <div class="mt-6">
+                        <div class="text-[10px] font-bold text-slate-400 mb-2 tracking-wider">LIVE MONITOR</div>
+                        <div id="midi-monitor-log" class="h-32 bg-slate-950 border border-slate-800 rounded p-2 text-[10px] font-mono text-slate-500 overflow-y-auto"></div>
+                    </div>
+                </section>
+                <!-- Clock Tab -->
+                <section id="midi-tab-clock" class="midi-tab-content hidden">
+                    <div class="space-y-4 max-w-xl">
+                        <label class="flex items-center gap-3 text-[11px] text-slate-300">
+                            <input id="midi-clock-enable" type="checkbox" class="accent-cyan-500">
+                            <span>Receive MIDI Clock (sync BPM from external source)</span>
+                        </label>
+                        <label class="flex items-center gap-3 text-[11px] text-slate-300 ml-6">
+                            <input id="midi-clock-ignore-transport" type="checkbox" class="accent-cyan-500">
+                            <span>Ignore Start/Stop (keep beat running regardless)</span>
+                        </label>
+                        <div class="mt-2 p-3 bg-slate-950 border border-slate-800 rounded text-[11px] font-mono space-y-1 text-slate-400">
+                            <div>Source: <span id="midi-clock-source">Manual</span></div>
+                            <div>Detected BPM: <span id="midi-clock-bpm">--</span></div>
+                            <div>Transport: <span id="midi-clock-transport">stopped</span></div>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">MIDI Clock uses 24 pulses per quarter note. When enabled, the manual BPM field is disabled and tap tempo remains available but will be overridden on the next clock tick.</p>
+                    </div>
+                </section>
+                <!-- Global Actions Tab -->
+                <section id="midi-tab-actions" class="midi-tab-content hidden">
+                    <div class="space-y-3 max-w-xl">
+                        <button id="midi-panic-btn" class="w-full text-sm bg-red-900 hover:bg-red-800 border border-red-700 text-red-200 font-bold px-4 py-3 rounded">MIDI PANIC (release all held / clear solo / blackout)</button>
+                        <button id="midi-clear-bindings-btn" class="w-full text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-4 py-2 rounded border border-slate-700">Clear All Bindings</button>
+                        <button id="midi-export-bindings-btn" class="w-full text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-4 py-2 rounded border border-slate-700">Export Bindings (JSON)</button>
+                        <label class="w-full text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-4 py-2 rounded border border-slate-700 cursor-pointer text-center block">
+                            Import Bindings (JSON)
+                            <input id="midi-import-bindings" type="file" accept=".json" class="hidden">
+                        </label>
+                        <div class="mt-6 text-[11px] text-slate-400 space-y-1">
+                            <div class="font-bold text-slate-300 mb-2">Shortcuts</div>
+                            <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">1</kbd>-<kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">9</kbd> Recall scene 1..9</div>
+                            <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">0</kbd> or <kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">B</kbd> Toggle blackout</div>
+                            <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">Shift+B</kbd> MIDI Panic</div>
+                            <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">T</kbd> Tap tempo</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Binding Editor Modal (inside Mappings table workflow) -->
+    <div id="midi-binding-editor" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm hidden opacity-0 transition-opacity duration-200">
+        <div class="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-[440px] max-w-[90vw] p-5 space-y-3 modal-content">
+            <h3 class="text-base font-bold text-white">Edit Binding</h3>
+            <div class="grid grid-cols-3 gap-2 items-center text-[11px]">
+                <label class="text-slate-400">MIDI Signature</label>
+                <div class="col-span-2 flex items-center gap-2">
+                    <span id="mbe-signature" class="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 font-mono text-slate-300">—</span>
+                    <button id="mbe-learn-btn" class="text-[10px] bg-purple-700 hover:bg-purple-600 text-white px-2 py-1 rounded">LEARN</button>
+                </div>
+
+                <label class="text-slate-400">Action</label>
+                <select id="mbe-action" class="col-span-2 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200"></select>
+
+                <label class="text-slate-400">Target</label>
+                <div id="mbe-target-wrap" class="col-span-2 space-y-1"></div>
+
+                <label class="text-slate-400">Behavior</label>
+                <select id="mbe-behavior" class="col-span-2 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200">
+                    <option value="trigger">Trigger (one-shot on press)</option>
+                    <option value="toggle">Toggle (flip state)</option>
+                    <option value="momentary">Momentary (hold)</option>
+                </select>
+
+                <label class="text-slate-400">Label</label>
+                <input id="mbe-label" type="text" placeholder="optional" class="col-span-2 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200">
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button id="mbe-cancel" class="text-[11px] px-3 py-1.5 rounded text-slate-300 hover:bg-slate-800">Cancel</button>
+                <button id="mbe-save" class="text-[11px] px-4 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Code Editor Modal -->
     <div id="code-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur hidden opacity-0 transition-opacity">
         <div class="bg-[#1e1e1e] border border-slate-700 rounded-lg shadow-2xl w-full max-w-[90vw] h-[90vh] flex flex-col">
@@ -283,13 +433,17 @@
                     <span class="layer-name text-xs font-bold text-slate-200 select-none tracking-wide">Name</span>
                     <span class="layer-type text-[9px] px-1.5 py-0.5 rounded font-mono font-bold tracking-wider opacity-70">GEN</span>
                 </div>
-                <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                    <button class="layer-edit-btn p-1.5 text-slate-400 hover:text-blue-400 rounded hover:bg-slate-800 transition-colors" title="Edit Code">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
-                    </button>
-                    <button class="layer-del-btn p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-slate-800 transition-colors" title="Delete">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    </button>
+                <div class="flex items-center gap-1">
+                    <button class="layer-mute-btn w-6 h-6 text-[9px] font-bold rounded border border-slate-700 text-slate-500 hover:text-red-400 hover:border-red-500 transition-colors" title="Mute layer (M)">M</button>
+                    <button class="layer-solo-btn w-6 h-6 text-[9px] font-bold rounded border border-slate-700 text-slate-500 hover:text-yellow-300 hover:border-yellow-400 transition-colors" title="Solo layer (S)">S</button>
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <button class="layer-edit-btn p-1.5 text-slate-400 hover:text-blue-400 rounded hover:bg-slate-800 transition-colors" title="Edit Code">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                        </button>
+                        <button class="layer-del-btn p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-slate-800 transition-colors" title="Delete">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
             
