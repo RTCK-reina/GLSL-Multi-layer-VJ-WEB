@@ -39,13 +39,19 @@ export class ProjectIO {
     }
 
     buildProjectPayload() {
+        const s = this._state;
         return {
-            version: '1.0',
+            version: '1.1',
             savedAt: new Date().toISOString(),
-            scenes: this._state.scenes,
-            midi: { map: this._state.midi.map },
+            scenes: s.scenes,
+            midi: {
+                map: s.midi.map,
+                bindings: s.midi.bindings,
+                clock: { enabled: s.midi.clock.enabled, ignoreTransport: s.midi.clock.ignoreTransport }
+            },
             sync: this._bpmSync.serializeSyncState(),
-            crossfade: { durationBeats: this._state.crossfade.durationBeats }
+            crossfade: { durationBeats: s.crossfade.durationBeats },
+            app: { blackout: !!s.blackout }
         };
     }
 
@@ -78,16 +84,23 @@ export class ProjectIO {
 
         let incomingScenes = null;
         let incomingMap = {};
+        let incomingBindings = [];
+        let incomingClock = null;
         let incomingSync = null;
         let incomingCrossfade = null;
+        let incomingApp = null;
 
         if (Array.isArray(normalizedData)) {
             incomingScenes = normalizedData;
         } else if (normalizedData && Array.isArray(normalizedData.scenes)) {
             incomingScenes = normalizedData.scenes;
-            incomingMap = (normalizedData.midi && normalizedData.midi.map) ? normalizedData.midi.map : {};
+            const midi = normalizedData.midi || {};
+            incomingMap = midi.map || {};
+            incomingBindings = Array.isArray(midi.bindings) ? midi.bindings : [];
+            incomingClock = midi.clock && typeof midi.clock === 'object' ? midi.clock : null;
             incomingSync = normalizedData.sync && typeof normalizedData.sync === 'object' ? normalizedData.sync : null;
             incomingCrossfade = normalizedData.crossfade && typeof normalizedData.crossfade === 'object' ? normalizedData.crossfade : null;
+            incomingApp = normalizedData.app && typeof normalizedData.app === 'object' ? normalizedData.app : null;
         }
         if (!Array.isArray(incomingScenes)) return false;
 
@@ -119,6 +132,7 @@ export class ProjectIO {
                     key: layerData.key,
                     blend: Number.isFinite(blendRaw) ? Math.max(0, Math.min(9, Math.round(blendRaw))) : 0,
                     opacity: Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1,
+                    muted: !!layerData.muted,
                     fragmentShader: typeof layerData.fragmentShader === 'string' ? layerData.fragmentShader : shaderDef.fragmentShader,
                     uniformsDef: this._sceneManager.sanitizeUniformsDef(layerData.uniformsDef, shaderDef.uniforms),
                     uniformValues: (layerData.uniformValues && typeof layerData.uniformValues === 'object' && !Array.isArray(layerData.uniformValues))
@@ -135,6 +149,24 @@ export class ProjectIO {
         this._sceneManager.cancelCrossfade({ silent: true });
         this._state.scenes = scenes;
         this._state.midi.map = this._midiManager.normalizeMidiMapKeys(incomingMap);
+        this._state.midi.bindings = incomingBindings
+            .filter(b => b && typeof b === 'object' && typeof b.signature === 'string' && b.action && typeof b.action === 'object')
+            .map(b => ({
+                id: typeof b.id === 'string' ? b.id : undefined,
+                signature: b.signature,
+                label: typeof b.label === 'string' ? b.label : '',
+                action: {
+                    type: b.action.type,
+                    target: b.action.target && typeof b.action.target === 'object' ? b.action.target : {},
+                    behavior: typeof b.action.behavior === 'string' ? b.action.behavior : null,
+                    invert: !!b.action.invert
+                }
+            }));
+        if (incomingClock) {
+            this._state.midi.clock.enabled = !!incomingClock.enabled;
+            this._state.midi.clock.ignoreTransport = !!incomingClock.ignoreTransport;
+        }
+        this._state.blackout = !!(incomingApp && incomingApp.blackout);
 
         if (incomingSync) this._bpmSync.applySyncState(incomingSync);
         else this._bpmSync.refreshBpmUI();
@@ -153,6 +185,9 @@ export class ProjectIO {
         this._state.sceneIdx = -1;
         this._sceneManager.renderSceneList();
         this._sceneManager.switchScene(0);
+
+        // Re-emit app-level state so UI updates
+        this._bus.emit('app:blackout', { active: !!this._state.blackout, source: 'load' });
         if (!this._undoManager.restoring) {
             const json = this.serializeProjectPayload();
             localStorage.setItem(this._storageKey, json);
@@ -238,14 +273,26 @@ export class ProjectIO {
     get canRedo() { return this._undoManager.canRedo; }
 
     restoreFromStorage() {
-        const raw = localStorage.getItem(this._storageKey);
+        let raw = localStorage.getItem(this._storageKey);
+        let sourceKey = this._storageKey;
+        if (!raw && Array.isArray(this._state.legacyStorageKeys)) {
+            for (const legacy of this._state.legacyStorageKeys) {
+                const v = localStorage.getItem(legacy);
+                if (v) { raw = v; sourceKey = legacy; break; }
+            }
+        }
         if (!raw) return false;
         try {
             const data = JSON.parse(raw);
-            return this.loadProjectData(data, { source: 'autosave', toastSuccess: false });
+            const ok = this.loadProjectData(data, { source: 'autosave', toastSuccess: false });
+            // If loaded from legacy key, migrate forward and leave legacy alone.
+            if (ok && sourceKey !== this._storageKey) {
+                this.persistToStorage();
+            }
+            return ok;
         } catch (err) {
             console.error('Failed to restore auto-saved project', err);
-            localStorage.removeItem(this._storageKey);
+            localStorage.removeItem(sourceKey);
             return false;
         }
     }

@@ -26,6 +26,16 @@ export class SceneManager {
         this._hideModal = null;
 
         bus.on('crossfade:complete', () => this._finalizeCrossfade());
+
+        // MIDI-driven navigation
+        bus.on('scene:recall', ({ index }) => this.switchScene(index));
+        bus.on('scene:step', ({ delta }) => {
+            const n = this._state.scenes.length;
+            if (n === 0) return;
+            const cur = this._state.sceneIdx >= 0 ? this._state.sceneIdx : 0;
+            const next = (((cur + delta) % n) + n) % n;
+            this.switchScene(next);
+        });
     }
 
     /** Proxy accessors for ProjectIO to call */
@@ -304,6 +314,7 @@ export class SceneManager {
             key: l.key,
             blend: l.blend,
             opacity: l.opacity,
+            muted: !!l.muted,
             fragmentShader: l.fragmentShader,
             uniformsDef: JSON.parse(JSON.stringify(l.uniformsDef)),
             uniformValues: Object.keys(l.uniformsDef).reduce((acc, k) => {

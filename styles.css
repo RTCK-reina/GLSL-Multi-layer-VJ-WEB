@@ -63,3 +63,45 @@
         .layer-panel-collapsed .layer-panel-arrow {
             transform: rotate(180deg);
         }
+
+        /* ── Layer M/S buttons & muted state ───────────────────── */
+        .layer-mute-btn.layer-flag-on {
+            background: rgba(127, 29, 29, 0.55);
+            color: #fca5a5;
+            border-color: #f87171;
+        }
+        .layer-solo-btn.layer-flag-on {
+            background: rgba(133, 77, 14, 0.55);
+            color: #fde68a;
+            border-color: #facc15;
+        }
+        .layer-card.layer-muted {
+            opacity: 0.45;
+            filter: grayscale(0.55);
+        }
+        .layer-card.layer-muted::before {
+            content: 'MUTED';
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            font-size: 8px;
+            color: #fca5a5;
+            letter-spacing: 0.1em;
+            font-weight: 700;
+            pointer-events: none;
+        }
+
+        /* ── MIDI activity pulse (header dot) ─────────────────── */
+        @keyframes midi-pulse-anim {
+            0%   { box-shadow: 0 0 0 0 rgba(192, 132, 252, 0.6); }
+            100% { box-shadow: 0 0 0 6px rgba(192, 132, 252, 0); }
+        }
+        #midi-status-dot.midi-pulse {
+            animation: midi-pulse-anim 180ms ease-out;
+        }
+
+        /* ── MIDI Config tab active state ─────────────────────── */
+        .midi-tab[data-active="true"] {
+            color: #e9d5ff;
+            border-bottom-color: #a855f7;
+        }

@@ -211,6 +211,25 @@ export class Renderer {
         // Render scene A (current layers)
         const readA = this._renderLayerStack(s.layers, this.bufferA, this.bufferB, time, audio, beatState);
 
+        // Blackout short-circuit: present black frame (still keep layer render for thumbnails)
+        if (s.blackout) {
+            this.renderer.setRenderTarget(null);
+            this.renderer.setClearColor(0x000000, 1);
+            this.renderer.clear();
+            this._lastReadBuffer = readA;
+            if (this._popupCtx) this._popupCtx.drawImage(this.renderer.domElement, 0, 0);
+            if (now - this._thumbLastUpdate >= this._thumbIntervalMs) {
+                this._thumbLastUpdate = now;
+                this._updateThumbnails();
+            }
+            const frameEnd2 = performance.now();
+            const frameDelta2 = deps.debugPanel._lastFrameStartMs > 0 ? (frameStart - deps.debugPanel._lastFrameStartMs) : 16.67;
+            deps.debugPanel._lastFrameStartMs = frameStart;
+            if (this._lastLayerTimings) deps.debugPanel.setLayerTimings(this._lastLayerTimings);
+            deps.debugPanel.updateMetrics(frameEnd2, frameDelta2, frameEnd2 - frameStart, frameEnd2 - renderStart);
+            return;
+        }
+
         if (cf.active) {
             // Ensure crossfade buffers exist
             if (!this.crossfadeBufferA) {
@@ -295,8 +314,20 @@ export class Renderer {
         this.renderer.setRenderTarget(read);
         this.renderer.clear();
 
-        let baseIdx = layers.findIndex(l => !l.needsInput);
-        if (baseIdx === -1 && layers.length > 0) baseIdx = 0;
+        // Determine which layers are composited this frame.
+        // Solo takes precedence: only the soloed layer gets through; everyone else is hidden.
+        // Mute hides individually. Layers still render to their own target so thumbnails stay live.
+        // Solo only applies when the solo target is actually in this stack.
+        const soloId = s.soloLayerId;
+        const soloActive = soloId && layers.some(l => l.id === soloId);
+        const isVisible = (l) => {
+            if (l.muted) return false;
+            if (soloActive && l.id !== soloId) return false;
+            return true;
+        };
+
+        let baseIdx = layers.findIndex(l => isVisible(l) && !l.needsInput);
+        if (baseIdx === -1) baseIdx = layers.findIndex(isVisible);
 
         layers.forEach((layer, i) => {
             const layerStart = performance.now();
@@ -322,6 +353,16 @@ export class Renderer {
                 this.copyMat.uniforms.u_texture.value = layer.renderTarget.texture;
                 this.quad.material = this.copyMat;
                 this.renderer.render(this.scene, this.camera);
+            }
+
+            // Skip composition when hidden (mute / solo), but keep per-layer render above
+            // so thumbnails and feedback state stay live.
+            if (!isVisible(layer)) {
+                this._lastLayerTimings.push({
+                    name: (layer.name || `Layer ${i}`) + ' (muted)',
+                    ms: performance.now() - layerStart
+                });
+                return;
             }
 
             const isBase = i === baseIdx;

@@ -8,28 +8,27 @@
  *   crossfade: { durationBeats }, audio: { bands, gains }
  */
 
-const CURRENT_VERSION = '1.0';
+const CURRENT_VERSION = '1.1';
 
 export function migrateProject(data) {
     if (!data || typeof data !== 'object') return data;
 
     const version = data.version || '0.5-alpha';
 
-    // Already V1.0+
     if (version === CURRENT_VERSION) return data;
 
-    // V0.5-alpha → V1.0
-    if (version === '0.5-alpha' || !data.version) {
-        return migrateFrom05(data);
-    }
+    // Chain migrations
+    let out = data;
+    if (version === '0.5-alpha' || !data.version) out = migrateFrom05(out);
+    if (out.version === '1.0') out = migrateFrom10(out);
+    if (out.version === CURRENT_VERSION) return out;
 
-    // Unknown version — pass through with warning
-    console.warn(`Unknown project version: ${version}, attempting load as-is`);
-    return data;
+    console.warn(`Unknown project version: ${out.version}, attempting load as-is`);
+    return out;
 }
 
 function migrateFrom05(data) {
-    const migrated = { ...data, version: CURRENT_VERSION };
+    const migrated = { ...data, version: '1.0' };
 
     // Ensure sync has all V1.0 fields
     if (migrated.sync && typeof migrated.sync === 'object') {
@@ -60,6 +59,28 @@ function migrateFrom05(data) {
     }
 
     return migrated;
+}
+
+/**
+ * V1.0 → V1.1
+ *
+ * V1.1 adds:
+ *   - midi.bindings: [] (action-level bindings)
+ *   - midi.clock:    { enabled, ignoreTransport }
+ *   - layers[].muted: boolean (default false)
+ *   - app: { blackout: false }
+ *
+ * V1.0 projects kept their legacy midi.map (CC → "layerId::uniform").
+ * We leave that in place: MidiManager still applies it alongside bindings,
+ * so existing uniform CC assignments work without migration noise.
+ */
+function migrateFrom10(data) {
+    const midi = (data.midi && typeof data.midi === 'object') ? { ...data.midi } : {};
+    if (!Array.isArray(midi.bindings)) midi.bindings = [];
+    if (!midi.clock || typeof midi.clock !== 'object') {
+        midi.clock = { enabled: false, ignoreTransport: false };
+    }
+    return { ...data, version: CURRENT_VERSION, midi };
 }
 
 export { CURRENT_VERSION };

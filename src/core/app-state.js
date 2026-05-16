@@ -19,10 +19,30 @@ export class AppState {
         this.preserveDrawingBuffer = localStorage.getItem('vj_preserve_buffer') === '1';
 
         // --- MIDI ---
+        // map: legacy CC→uniform map, kept for backwards compatibility.
+        //      Format: { "layerId::u_key": ccNumber }
+        //      On v1.1+ projects the canonical source is `bindings`.
+        // bindings: array of action-level bindings.
+        //      Shape: { id, signature, action: { type, target, behavior, invert }, label }
+        //      signature format: "cc|Ch|Num", "note|Ch|Num", "pc|Ch|Num" (Ch=1-16 or 0 for omni).
+        // devices: per-device enabled flag (keyed by device id).
+        // clock:   MIDI Clock sync state.
+        // activity: last-received signature + timestamp (for UI pulse).
         this.midi = {
             inputs: [],
             map: {},
-            learn: { active: false, targetMapKey: null }
+            bindings: [],
+            devices: {},
+            clock: {
+                enabled: false,
+                ignoreTransport: false,
+                running: false,
+                lastPulseMs: 0,
+                pulseIntervals: [],
+                estimatedBpm: 0
+            },
+            activity: { signature: null, at: 0 },
+            learn: { active: false, targetMapKey: null, targetBindingId: null }
         };
 
         // --- BPM / Sync ---
@@ -60,8 +80,17 @@ export class AppState {
         this.webcam = null;
         this.webcamStream = null;
 
+        // --- App-level live controls ---
+        // blackout: when true, renderer outputs black (post-crossfade overlay).
+        // soloLayerId: if set, only that layer is composited (others suppressed).
+        //              null means solo inactive.
+        this.blackout = false;
+        this.soloLayerId = null;
+
         // --- Persistence ---
-        this.projectStorageKey = 'vj_project_autosave_v0_5';
+        // Storage key is versioned; v1.1 adds bindings/clock/blackout etc.
+        this.projectStorageKey = 'vj_project_autosave_v1_1';
+        this.legacyStorageKeys = ['vj_project_autosave_v0_5'];
         this.storageErrorShown = false;
 
         // --- Debug ---
