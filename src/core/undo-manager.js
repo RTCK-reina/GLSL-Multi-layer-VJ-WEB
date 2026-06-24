@@ -25,7 +25,13 @@ export class UndoManager {
      */
     commit(snapshotJSON) {
         if (this._restoring) return;
-        if (snapshotJSON === this._lastCommitted) return;
+        // Dedup on *content*, ignoring volatile fields (e.g. `savedAt`, which is a fresh
+        // timestamp on every serialize). Otherwise two snapshots of the identical project
+        // state never compare equal, so a deferred autosave fired by a restore (undo/redo
+        // schedules a save via queueMicrotask → setTimeout, which runs after `restoring`
+        // has already been reset) re-commits the same state and wipes the redo stack.
+        // Comparing normalized content makes that re-commit a no-op.
+        if (this._normalize(snapshotJSON) === this._normalize(this._lastCommitted)) return;
         if (this._lastCommitted !== null) {
             this._undoStack.push(this._lastCommitted);
             if (this._undoStack.length > this._maxHistory) {
@@ -70,6 +76,24 @@ export class UndoManager {
         this._undoStack = [];
         this._redoStack = [];
         this._lastCommitted = snapshotJSON;
+    }
+
+    /**
+     * Strip volatile fields so two serializations of the same logical state compare
+     * equal. Currently only the top-level `savedAt` timestamp. Returns the input
+     * unchanged if it isn't parseable JSON (defensive — never throws).
+     * @param {string|null} snapshotJSON
+     * @returns {string|null}
+     */
+    _normalize(snapshotJSON) {
+        if (snapshotJSON == null) return snapshotJSON;
+        try {
+            const obj = JSON.parse(snapshotJSON);
+            if (obj && typeof obj === 'object') delete obj.savedAt;
+            return JSON.stringify(obj);
+        } catch {
+            return snapshotJSON;
+        }
     }
 
     /** Prevent commits during restore operations */
