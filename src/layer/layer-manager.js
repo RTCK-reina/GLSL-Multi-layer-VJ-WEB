@@ -86,6 +86,7 @@ export class LayerManager {
         if (def.isWebCam) this._renderer.initWebCam();
 
         const s = this._state;
+        const renderSize = this._renderer.getRenderSize ? this._renderer.getRenderSize() : { width: s.width, height: s.height };
         const uniformDefs = this.sanitizeUniformsDef(
             config && config.uniformsDef ? config.uniformsDef : def.uniforms,
             def.uniforms
@@ -106,7 +107,7 @@ export class LayerManager {
             uniformsDef: uniformDefs,
             uniforms: {
                 u_time: { value: 0 },
-                u_resolution: { value: new THREE.Vector2(s.width, s.height) },
+                u_resolution: { value: new THREE.Vector2(renderSize.width, renderSize.height) },
                 u_bass: { value: 0 }, u_mid: { value: 0 }, u_treble: { value: 0 },
                 u_bpm: { value: s.bpm }, u_beat: { value: 0 }, u_phase: { value: 0 },
                 u_inputTexture: { value: null }, u_webcamTexture: { value: null }, u_prevLayer: { value: null }

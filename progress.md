@@ -63,3 +63,45 @@ Original prompt (follow-up): "VJ ツールとしての改善を多く行って�
 - Node 簡易テスト: signature 構築/解析/omni match、scene.recall on note、layer.mute toggle、momentary edge on/off、uniform.set on cc、PC → scene.recall fallback、actionSupports の境界をいずれも確認。
 - migrator: 0.5-alpha と 1.0 のプロジェクトがどちらも 1.1 に展開され、legacy midi.map は温存されることを確認。
 - メモ: ブラウザ UI / Web MIDI 実機テストはこの環境では未実施 (手動確認を次のステップで推奨)。
+
+---
+
+## v1.2 — Live Engine / Performance Guard / Live Coding UX (2026-07-06)
+
+Original prompt: "これを再設計するならどうする？現在の仕様を元に更なるブラッシュアップ、革新的なテクノロジー、更なるUI,UX、拡張性、安定性、ライブパフォーマンス性、ライブコーディング適正、MIDI適正、VJ適正など全てをブラッシュアップ、更新、最適化、高性能化、高機能化を行なってください"
+
+### 採用判断
+- 採用: 既存 GLSL/WebGL パイプラインを維持し、内部 render-scale と Live Engine を追加する段階的再設計。
+- 棄却: WebGPU 全面移行。理由は既存 GLSL 資産、Three.js FBO 合成、Monaco live editing、MIDI/scene 保存形式への影響が大きく、今回の目的に対して破壊リスクが高いため。
+
+### Performance Guard (`src/performance/`, `src/renderer/`)
+- 新規 `PerformanceGuard` を追加。`render:metrics` を監視して target FPS に対する frame budget 超過を検出する。
+- 内部 render target サイズを出力解像度から分離。`renderScale` 0.5-1.0 で FBO サイズを縮小し、最終出力へアップスケールする。
+- Quality / Balanced / Performance profile を追加。thumbnail 更新間隔も profile/adaptive level に応じて調整する。
+- `Freeze Hidden` を追加。mute/solo で非表示のレイヤーを保持して、必要時だけ負荷を落とせる。
+- `Renderer` は blackout 中も通常描画中も `render:metrics` を発火するため、監視が途切れない。
+
+### UI / UX
+- Sidebar 上部に `LIVE ENGINE` パネルを追加。scene/layer/FPS/frame/render-scale/crossfade/MIDI/thumbnail cadence を表示。
+- `G` で Performance Guard ON/OFF、`Shift+G` で performance profile cycle。
+- WebMidi.js を `@latest` から `3.1.16` にピン留め。
+- esbuild を `0.28.1` に更新し、dev-server advisory を解消。
+- タイトルと表示バージョンを v1.2 に更新。
+
+### Live Coding
+- GLSL Editor に `APPLY LIVE (CTRL+ENTER)` を追加。成功時にエディタを閉じず、ライブ中に連続調整できる。
+- 既存 `APPLY (CTRL+S)` は従来どおり成功時に閉じる。
+- Compile 成功/失敗を `editor-status` に表示し、toast と Monaco error decoration に同期する。
+
+### MIDI / 保存
+- MIDI action に `performance.guard.toggle` と `performance.profile.next` を追加。
+- MIDI Config filter に Performance を追加。
+- project schema を `1.2` に更新し、`performance` 設定を保存対象へ追加。
+- `project-migrator.js` は `0.5-alpha -> 1.0 -> 1.1 -> 1.2` を連鎖適用する。
+
+### 検証
+- `npm run build` 成功。
+- Node 簡易検証: project migrator (0.5-alpha/1.0/1.1 → 1.2)、Performance MIDI actions、Performance Guard adaptive downshift を確認。
+- `npm audit --json` は 0 vulnerabilities。
+- Playwright: desktop と 390px viewport で初期表示、Live Engine 表示、console error 0 を確認。警告は Tailwind CDN と Three.js global build の既知警告のみ。
+- 未検証: 実 MIDI コントローラー、Web MIDI 権限付与後のブラウザ実機操作、長時間ライブ負荷テスト。

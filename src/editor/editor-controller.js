@@ -28,6 +28,7 @@ export class EditorController {
         this._monaco = null;
         this._monacoU = null;
         this._editorSaveAction = null;
+        this._editorLiveApplyAction = null;
         this._editorClose = null;
         this._editorCommandsBound = false;
         this._errorDecorations = [];
@@ -42,6 +43,12 @@ export class EditorController {
         m.classList.remove('hidden');
         setTimeout(() => m.classList.remove('opacity-0'), 10);
         document.getElementById('editor-layer-name').textContent = layer.name;
+        const status = document.getElementById('editor-status');
+        if (status) {
+            status.textContent = 'Ready';
+            status.classList.remove('text-red-300', 'text-emerald-300');
+            status.classList.add('text-slate-500');
+        }
 
         const sameLayer = this._currentLayerId === layer.id;
         this._currentLayerId = layer.id;
@@ -80,6 +87,7 @@ export class EditorController {
             m.classList.add('opacity-0');
             setTimeout(() => m.classList.add('hidden'), 300);
             this._editorSaveAction = null;
+            this._editorLiveApplyAction = null;
         };
         document.getElementById('editor-cancel-btn').onclick = close;
         this._editorClose = close;
@@ -109,7 +117,8 @@ export class EditorController {
     _bindEditorSave(layer) {
         this._errorDecorations = [];
 
-        const save = () => {
+        const save = (options = {}) => {
+            const closeOnSuccess = options.closeOnSuccess !== false;
             let mat = null;
             try {
                 const fs = this._monaco.getValue();
@@ -130,10 +139,11 @@ export class EditorController {
 
                 const ud = this._layerManager.sanitizeUniformsDef(rawUd, layer.uniformsDef);
                 const s = this._state;
+                const renderSize = this._renderer.getRenderSize ? this._renderer.getRenderSize() : { width: s.width, height: s.height };
 
                 const nextUniforms = {
                     u_time: { value: 0 },
-                    u_resolution: { value: new THREE.Vector2(s.width, s.height) },
+                    u_resolution: { value: new THREE.Vector2(renderSize.width, renderSize.height) },
                     u_bass: { value: 0 }, u_mid: { value: 0 }, u_treble: { value: 0 },
                     u_bpm: { value: s.bpm }, u_beat: { value: 0 }, u_phase: { value: 0 },
                     u_inputTexture: { value: null }, u_webcamTexture: { value: null }, u_prevLayer: { value: null }
@@ -160,13 +170,25 @@ export class EditorController {
                 const card = document.querySelector(`.layer-card[data-id="${layer.id}"]`);
                 this._layerManager.renderLayerUI(layer, { replaceEl: card });
                 this._bus.emit('project:autosave');
-                this._editorClose();
-                this._bus.emit('toast', { msg: 'Shader compiled successfully!', type: 'success' });
+                if (closeOnSuccess) this._editorClose();
+                const status = document.getElementById('editor-status');
+                if (status) {
+                    status.textContent = closeOnSuccess ? 'Applied' : `Live applied ${new Date().toLocaleTimeString()}`;
+                    status.classList.remove('text-red-300');
+                    status.classList.add('text-emerald-300');
+                }
+                this._bus.emit('toast', { msg: closeOnSuccess ? 'Shader compiled successfully!' : 'Shader live-applied', type: 'success' });
             } catch (e) {
                 if (mat) mat.dispose();
                 console.error(e);
                 const errorInfo = this._parseShaderError(e.message || 'Unknown compilation error');
                 this._bus.emit('toast', { msg: errorInfo.message, type: 'error' });
+                const status = document.getElementById('editor-status');
+                if (status) {
+                    status.textContent = errorInfo.message;
+                    status.classList.remove('text-emerald-300');
+                    status.classList.add('text-red-300');
+                }
 
                 if (errorInfo.line && this._monaco) {
                     this._monaco.revealLineInCenter(errorInfo.line);
@@ -185,20 +207,29 @@ export class EditorController {
         };
 
         this._editorSaveAction = save;
-        document.getElementById('editor-save-btn').onclick = save;
+        this._editorLiveApplyAction = () => save({ closeOnSuccess: false });
+        document.getElementById('editor-save-btn').onclick = () => save();
+        const liveBtn = document.getElementById('editor-live-apply-btn');
+        if (liveBtn) liveBtn.onclick = this._editorLiveApplyAction;
 
         if (!this._editorCommandsBound && this._monaco && this._monacoU) {
             this._editorCommandsBound = true;
             const saveKey = monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS;
+            const liveKey = monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter;
             const escKey = monaco.KeyCode.Escape;
             const runSave = () => {
                 if (typeof this._editorSaveAction === 'function') this._editorSaveAction();
+            };
+            const runLiveApply = () => {
+                if (typeof this._editorLiveApplyAction === 'function') this._editorLiveApplyAction();
             };
             const runClose = () => {
                 if (typeof this._editorClose === 'function') this._editorClose();
             };
             this._monaco.addCommand(saveKey, runSave);
             this._monacoU.addCommand(saveKey, runSave);
+            this._monaco.addCommand(liveKey, runLiveApply);
+            this._monacoU.addCommand(liveKey, runLiveApply);
             this._monaco.addCommand(escKey, runClose);
             this._monacoU.addCommand(escKey, runClose);
         }

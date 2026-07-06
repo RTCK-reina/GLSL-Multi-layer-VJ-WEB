@@ -338,6 +338,12 @@ export class UIController {
                     else this._bus.emit('app:blackout', { active: !this._state.blackout, source: 'key' });
                     return;
                 }
+                if (key === 'g') {
+                    e.preventDefault();
+                    if (e.shiftKey) this._bus.emit('performance:profile-step', { delta: 1 });
+                    else this._bus.emit('performance:guard-toggle', {});
+                    return;
+                }
             }
 
             // Escape — cancel MIDI Learn first, then close modals
