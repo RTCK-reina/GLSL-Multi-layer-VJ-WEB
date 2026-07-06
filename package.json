@@ -1,6 +1,6 @@
 {
   "name": "glsl-multi-layer-vj",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "GLSL Multi-layer VJ System",
   "scripts": {
@@ -9,6 +9,6 @@
     "serve": "npx serve -l 3000 ."
   },
   "devDependencies": {
-    "esbuild": "^0.20.0"
+    "esbuild": "^0.28.1"
   }
 }

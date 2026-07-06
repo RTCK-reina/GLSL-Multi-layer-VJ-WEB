@@ -36,13 +36,41 @@ export class Renderer {
 
         // Per-layer timing (for debug panel)
         this._lastLayerTimings = [];
+        this._renderWidth = 1;
+        this._renderHeight = 1;
 
         this._initThree();
+    }
+
+    _getRenderScale() {
+        const p = this._state.performance || {};
+        const raw = Number(p.renderScale);
+        return Number.isFinite(raw) ? Math.max(0.5, Math.min(1, raw)) : 1;
+    }
+
+    _computeRenderSize() {
+        const scale = this._getRenderScale();
+        return {
+            width: Math.max(2, Math.round(this._state.width * scale)),
+            height: Math.max(2, Math.round(this._state.height * scale)),
+            scale
+        };
+    }
+
+    getRenderSize() {
+        return {
+            width: this._renderWidth,
+            height: this._renderHeight,
+            scale: this._getRenderScale()
+        };
     }
 
     _initThree() {
         const s = this._state;
         const canvas = document.getElementById('main-canvas');
+        const renderSize = this._computeRenderSize();
+        this._renderWidth = renderSize.width;
+        this._renderHeight = renderSize.height;
         this.renderer = new THREE.WebGLRenderer({
             canvas,
             antialias: false,
@@ -64,8 +92,8 @@ export class Renderer {
 
         // Ping-Pong Buffers
         const pars = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat };
-        this.bufferA = new THREE.WebGLRenderTarget(s.width, s.height, pars);
-        this.bufferB = new THREE.WebGLRenderTarget(s.width, s.height, pars);
+        this.bufferA = new THREE.WebGLRenderTarget(this._renderWidth, this._renderHeight, pars);
+        this.bufferB = new THREE.WebGLRenderTarget(this._renderWidth, this._renderHeight, pars);
 
         // Copy material
         this.copyMat = new THREE.ShaderMaterial({
@@ -223,10 +251,7 @@ export class Renderer {
                 this._updateThumbnails();
             }
             const frameEnd2 = performance.now();
-            const frameDelta2 = deps.debugPanel._lastFrameStartMs > 0 ? (frameStart - deps.debugPanel._lastFrameStartMs) : 16.67;
-            deps.debugPanel._lastFrameStartMs = frameStart;
-            if (this._lastLayerTimings) deps.debugPanel.setLayerTimings(this._lastLayerTimings);
-            deps.debugPanel.updateMetrics(frameEnd2, frameDelta2, frameEnd2 - frameStart, frameEnd2 - renderStart);
+            this._finishFrameMetrics(deps, frameStart, renderStart, frameEnd2);
             return;
         }
 
@@ -234,9 +259,9 @@ export class Renderer {
             // Ensure crossfade buffers exist
             if (!this.crossfadeBufferA) {
                 const pars = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat };
-                this.crossfadeBufferA = new THREE.WebGLRenderTarget(s.width, s.height, pars);
-                this.crossfadeBufferB = new THREE.WebGLRenderTarget(s.width, s.height, pars);
-                this.crossfadeResultRT = new THREE.WebGLRenderTarget(s.width, s.height, pars);
+                this.crossfadeBufferA = new THREE.WebGLRenderTarget(this._renderWidth, this._renderHeight, pars);
+                this.crossfadeBufferB = new THREE.WebGLRenderTarget(this._renderWidth, this._renderHeight, pars);
+                this.crossfadeResultRT = new THREE.WebGLRenderTarget(this._renderWidth, this._renderHeight, pars);
             }
 
             // Update crossfade mix from beat position
@@ -295,10 +320,30 @@ export class Renderer {
         }
 
         const frameEnd = performance.now();
+        this._finishFrameMetrics(deps, frameStart, renderStart, frameEnd);
+    }
+
+    _finishFrameMetrics(deps, frameStart, renderStart, frameEnd) {
         const frameDelta = deps.debugPanel._lastFrameStartMs > 0 ? (frameStart - deps.debugPanel._lastFrameStartMs) : 16.67;
         deps.debugPanel._lastFrameStartMs = frameStart;
         if (this._lastLayerTimings) deps.debugPanel.setLayerTimings(this._lastLayerTimings);
         deps.debugPanel.updateMetrics(frameEnd, frameDelta, frameEnd - frameStart, frameEnd - renderStart);
+        this._bus.emit('render:metrics', {
+            nowMs: frameEnd,
+            frameDeltaMs: frameDelta,
+            cpuMs: frameEnd - frameStart,
+            renderMs: frameEnd - renderStart,
+            fps: frameDelta > 0 ? 1000 / frameDelta : 0,
+            renderScale: this._getRenderScale(),
+            renderWidth: this._renderWidth,
+            renderHeight: this._renderHeight,
+            thumbnailIntervalMs: this._thumbIntervalMs,
+            layers: this._state.layers.length,
+            crossfade: {
+                active: !!this._state.crossfade.active,
+                mix: this._state.crossfade.mix
+            }
+        });
     }
 
     /**
@@ -331,6 +376,16 @@ export class Renderer {
 
         layers.forEach((layer, i) => {
             const layerStart = performance.now();
+            const hidden = !isVisible(layer);
+            const freezeHidden = hidden && s.performance && s.performance.freezeHiddenLayers;
+            if (freezeHidden) {
+                this._lastLayerTimings.push({
+                    name: (layer.name || `Layer ${i}`) + ' (held)',
+                    ms: performance.now() - layerStart
+                });
+                return;
+            }
+
             layer.uniforms.u_time.value = time;
             layer.uniforms.u_bass.value = audio.bass;
             layer.uniforms.u_mid.value = audio.mid;
@@ -357,7 +412,7 @@ export class Renderer {
 
             // Skip composition when hidden (mute / solo), but keep per-layer render above
             // so thumbnails and feedback state stay live.
-            if (!isVisible(layer)) {
+            if (hidden) {
                 this._lastLayerTimings.push({
                     name: (layer.name || `Layer ${i}`) + ' (muted)',
                     ms: performance.now() - layerStart
@@ -433,21 +488,50 @@ export class Renderer {
         s.width = w;
         s.height = h;
         this.renderer.setSize(w, h);
-        this.bufferA.setSize(w, h);
-        this.bufferB.setSize(w, h);
+        this._resizeRenderTargets();
+        this.syncPopupSize();
+    }
+
+    setRenderScale(scale) {
+        const p = this._state.performance || {};
+        const next = Math.max(0.5, Math.min(1, Number(scale) || 1));
+        const nextWidth = Math.max(2, Math.round(this._state.width * next));
+        const nextHeight = Math.max(2, Math.round(this._state.height * next));
+        if (Math.abs((p.renderScale || 1) - next) < 0.001
+            && this._renderWidth === nextWidth
+            && this._renderHeight === nextHeight) return;
+        p.renderScale = next;
+        this._resizeRenderTargets();
+    }
+
+    setThumbnailInterval(ms) {
+        const next = Math.max(60, Math.min(1000, Math.round(Number(ms) || 180)));
+        this._thumbIntervalMs = next;
+        if (this._state.performance) {
+            this._state.performance.thumbnailIntervalMs = next;
+        }
+    }
+
+    _resizeRenderTargets() {
+        const s = this._state;
+        const renderSize = this._computeRenderSize();
+        this._renderWidth = renderSize.width;
+        this._renderHeight = renderSize.height;
+
+        this.bufferA.setSize(this._renderWidth, this._renderHeight);
+        this.bufferB.setSize(this._renderWidth, this._renderHeight);
         if (this.crossfadeBufferA) {
-            this.crossfadeBufferA.setSize(w, h);
-            this.crossfadeBufferB.setSize(w, h);
-            this.crossfadeResultRT.setSize(w, h);
+            this.crossfadeBufferA.setSize(this._renderWidth, this._renderHeight);
+            this.crossfadeBufferB.setSize(this._renderWidth, this._renderHeight);
+            this.crossfadeResultRT.setSize(this._renderWidth, this._renderHeight);
         }
         const resizeLayer = (l) => {
-            l.renderTarget.setSize(w, h);
-            if (l.fbo) l.fbo.setSize(w, h);
-            l.uniforms.u_resolution.value.set(w, h);
+            l.renderTarget.setSize(this._renderWidth, this._renderHeight);
+            if (l.fbo) l.fbo.setSize(this._renderWidth, this._renderHeight);
+            l.uniforms.u_resolution.value.set(this._renderWidth, this._renderHeight);
         };
         s.layers.forEach(resizeLayer);
         s.crossfade.layersB.forEach(resizeLayer);
-        this.syncPopupSize();
     }
 
     /** Open popup output window. */
@@ -479,7 +563,7 @@ export class Renderer {
 
     /** Create a new WebGLRenderTarget at current resolution. */
     createRenderTarget() {
-        return new THREE.WebGLRenderTarget(this._state.width, this._state.height);
+        return new THREE.WebGLRenderTarget(this._renderWidth, this._renderHeight);
     }
 
     /** Create a ShaderMaterial with the standard vertex shader. */

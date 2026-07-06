@@ -486,7 +486,7 @@ export class MidiConfigUI {
     // ---------- Import / export ----------
 
     _exportBindings() {
-        const payload = { version: '1.1', bindings: this._state.midi.bindings };
+        const payload = { version: '1.2', bindings: this._state.midi.bindings };
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

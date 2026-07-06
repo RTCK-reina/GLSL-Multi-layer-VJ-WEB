@@ -41,7 +41,7 @@ export class ProjectIO {
     buildProjectPayload() {
         const s = this._state;
         return {
-            version: '1.1',
+            version: '1.2',
             savedAt: new Date().toISOString(),
             scenes: s.scenes,
             midi: {
@@ -51,6 +51,12 @@ export class ProjectIO {
             },
             sync: this._bpmSync.serializeSyncState(),
             crossfade: { durationBeats: s.crossfade.durationBeats },
+            performance: {
+                guardEnabled: !!s.performance.guardEnabled,
+                targetFps: s.performance.targetFps,
+                profile: s.performance.profile,
+                freezeHiddenLayers: !!s.performance.freezeHiddenLayers
+            },
             app: { blackout: !!s.blackout }
         };
     }
@@ -88,6 +94,7 @@ export class ProjectIO {
         let incomingClock = null;
         let incomingSync = null;
         let incomingCrossfade = null;
+        let incomingPerformance = null;
         let incomingApp = null;
 
         if (Array.isArray(normalizedData)) {
@@ -100,6 +107,7 @@ export class ProjectIO {
             incomingClock = midi.clock && typeof midi.clock === 'object' ? midi.clock : null;
             incomingSync = normalizedData.sync && typeof normalizedData.sync === 'object' ? normalizedData.sync : null;
             incomingCrossfade = normalizedData.crossfade && typeof normalizedData.crossfade === 'object' ? normalizedData.crossfade : null;
+            incomingPerformance = normalizedData.performance && typeof normalizedData.performance === 'object' ? normalizedData.performance : null;
             incomingApp = normalizedData.app && typeof normalizedData.app === 'object' ? normalizedData.app : null;
         }
         if (!Array.isArray(incomingScenes)) return false;
@@ -181,6 +189,15 @@ export class ProjectIO {
                 if (cfSelect) cfSelect.value = String(dur);
             }
         }
+        if (incomingPerformance) {
+            const target = Number(incomingPerformance.targetFps);
+            const profile = incomingPerformance.profile;
+            this._state.performance.guardEnabled = incomingPerformance.guardEnabled !== false;
+            this._state.performance.targetFps = [30, 45, 60].includes(target) ? target : 60;
+            this._state.performance.profile = ['quality', 'balanced', 'performance'].includes(profile) ? profile : 'balanced';
+            this._state.performance.freezeHiddenLayers = !!incomingPerformance.freezeHiddenLayers;
+            this._state.performance.adaptiveLevel = 0;
+        }
 
         this._state.sceneIdx = -1;
         this._sceneManager.renderSceneList();
@@ -201,6 +218,7 @@ export class ProjectIO {
         if (source === 'autosave') {
             this._bus.emit('toast', { msg: 'Auto-saved project restored', type: 'info' });
         }
+        this._bus.emit('project:loaded', { source });
         return true;
     }
 

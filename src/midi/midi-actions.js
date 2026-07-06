@@ -114,6 +114,22 @@ export const MIDI_ACTIONS = {
         continuous: false,
         target: 'none',
         defaultBehavior: 'trigger'
+    },
+    'performance.guard.toggle': {
+        label: 'Performance Guard Toggle',
+        category: 'Performance',
+        supports: ['note', 'cc'],
+        continuous: false,
+        target: 'none',
+        defaultBehavior: 'toggle'
+    },
+    'performance.profile.next': {
+        label: 'Next Performance Profile',
+        category: 'Performance',
+        supports: ['note', 'cc'],
+        continuous: false,
+        target: 'none',
+        defaultBehavior: 'trigger'
     }
 };
 

@@ -1,5 +1,5 @@
 /**
- * ProjectMigrator — Converts V0.5 project JSON to V1.0 format.
+ * ProjectMigrator — Converts legacy project JSON to the current format.
  *
  * V0.5 format:
  *   { version: "0.5-alpha", scenes, midi: { map }, sync }
@@ -8,7 +8,7 @@
  *   crossfade: { durationBeats }, audio: { bands, gains }
  */
 
-const CURRENT_VERSION = '1.1';
+const CURRENT_VERSION = '1.2';
 
 export function migrateProject(data) {
     if (!data || typeof data !== 'object') return data;
@@ -21,6 +21,7 @@ export function migrateProject(data) {
     let out = data;
     if (version === '0.5-alpha' || !data.version) out = migrateFrom05(out);
     if (out.version === '1.0') out = migrateFrom10(out);
+    if (out.version === '1.1') out = migrateFrom11(out);
     if (out.version === CURRENT_VERSION) return out;
 
     console.warn(`Unknown project version: ${out.version}, attempting load as-is`);
@@ -62,7 +63,7 @@ function migrateFrom05(data) {
 }
 
 /**
- * V1.0 → V1.1
+ * V1.0 -> V1.1
  *
  * V1.1 adds:
  *   - midi.bindings: [] (action-level bindings)
@@ -80,7 +81,29 @@ function migrateFrom10(data) {
     if (!midi.clock || typeof midi.clock !== 'object') {
         midi.clock = { enabled: false, ignoreTransport: false };
     }
-    return { ...data, version: CURRENT_VERSION, midi };
+    return { ...data, version: '1.1', midi };
+}
+
+/**
+ * V1.1 -> V1.2
+ *
+ * V1.2 adds:
+ *   - performance: Performance Guard project prefs
+ */
+function migrateFrom11(data) {
+    const performance = (data.performance && typeof data.performance === 'object')
+        ? { ...data.performance }
+        : {};
+    return {
+        ...data,
+        version: CURRENT_VERSION,
+        performance: {
+            guardEnabled: performance.guardEnabled !== false,
+            targetFps: [30, 45, 60].includes(Number(performance.targetFps)) ? Number(performance.targetFps) : 60,
+            profile: ['quality', 'balanced', 'performance'].includes(performance.profile) ? performance.profile : 'balanced',
+            freezeHiddenLayers: !!performance.freezeHiddenLayers
+        }
+    };
 }
 
 export { CURRENT_VERSION };

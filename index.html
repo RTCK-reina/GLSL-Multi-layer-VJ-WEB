@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GLSL Multi layer VJ V0.5 alpha "Memory Keeper"</title>
+    <title>GLSL Multi-layer VJ v1.2 "Live Engine"</title>
+    <link rel="icon" href="data:,">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- SortableJS -->
@@ -15,7 +16,7 @@
     <link rel="preload" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/editor/editor.main.js" as="script">
     <link rel="preload" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/editor/editor.main.css" as="style">
     <!-- WebMidi.js -->
-    <script src="https://cdn.jsdelivr.net/npm/webmidi@latest/dist/iife/webmidi.iife.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/webmidi@3.1.16/dist/iife/webmidi.iife.js"></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./styles.css">
@@ -28,14 +29,14 @@
             <button id="sidebar-toggle-btn" class="text-slate-400 hover:text-white transition-colors p-1 -ml-1" title="Toggle Sidebar (Tab)">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
             </button>
-            <h1 class="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-500">GLSL VJ <span class="text-[10px] text-slate-500 font-mono border border-slate-800 rounded px-1 ml-1">v1.0</span></h1>
+            <h1 class="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-500">GLSL VJ <span class="text-[10px] text-slate-500 font-mono border border-slate-800 rounded px-1 ml-1">v1.2</span></h1>
             <div class="h-4 w-px bg-slate-800 mx-2"></div>
             <div class="flex items-center gap-3 text-[10px] font-mono text-slate-500">
                 <span id="fps-counter" class="text-green-500 w-16">FPS: --</span>
                 <span id="resolution-display">1920x1080</span>
             </div>
         </div>
-        
+
         <!-- Audio Visualizer -->
         <div class="flex items-center gap-3 flex-1 justify-center max-w-lg mx-4" id="audio-visualizer-container">
             <button id="audio-enable-btn" class="text-[10px] font-bold bg-slate-900 hover:bg-slate-800 text-purple-400 px-2 py-1.5 rounded border border-purple-900/50 transition-colors uppercase tracking-widest whitespace-nowrap">
@@ -123,6 +124,41 @@
                     <input id="preserve-buffer-toggle" type="checkbox" class="accent-purple-500">
                     Preserve Buffer (Reload)
                 </label>
+                <div class="live-engine-panel space-y-2 pt-2 border-t border-slate-800/70">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold text-slate-400 tracking-widest">LIVE ENGINE</span>
+                        <span id="performance-status" class="performance-status-pill" data-state="nominal">NOMINAL</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-mono">
+                        <span class="text-slate-500">Scene</span><span id="live-scene" class="text-right text-slate-200 truncate">--</span>
+                        <span class="text-slate-500">Layers</span><span id="live-layers" class="text-right text-slate-200 truncate">--</span>
+                        <span class="text-slate-500">FPS / Frame</span><span class="text-right text-slate-200"><span id="live-fps">--</span> / <span id="live-frame-ms">-- ms</span></span>
+                        <span class="text-slate-500">Render Scale</span><span id="live-render-scale" class="text-right text-emerald-300">100%</span>
+                        <span class="text-slate-500">Crossfade</span><span id="live-crossfade" class="text-right text-cyan-300">idle</span>
+                        <span class="text-slate-500">Last MIDI</span><span id="live-midi-last" class="text-right text-purple-300 truncate">none</span>
+                        <span class="text-slate-500">Thumbnails</span><span id="live-thumbnail-rate" class="text-right text-slate-300">180 ms</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 pt-1">
+                        <label class="flex items-center gap-2 text-[10px] text-slate-400">
+                            <input id="performance-guard-toggle" type="checkbox" class="accent-emerald-500" checked>
+                            Guard
+                        </label>
+                        <label class="flex items-center gap-2 text-[10px] text-slate-400">
+                            <input id="performance-freeze-hidden" type="checkbox" class="accent-amber-500">
+                            Freeze Hidden
+                        </label>
+                        <select id="performance-profile" class="bg-slate-900 text-slate-300 text-[10px] border border-slate-800 rounded px-2 py-1 focus:border-emerald-500 outline-none">
+                            <option value="quality">Quality</option>
+                            <option value="balanced" selected>Balanced</option>
+                            <option value="performance">Performance</option>
+                        </select>
+                        <select id="performance-target-fps" class="bg-slate-900 text-slate-300 text-[10px] border border-slate-800 rounded px-2 py-1 focus:border-emerald-500 outline-none">
+                            <option value="60" selected>60 FPS</option>
+                            <option value="45">45 FPS</option>
+                            <option value="30">30 FPS</option>
+                        </select>
+                    </div>
+                </div>
             </div>
 
             <!-- Scene List -->
@@ -267,6 +303,7 @@
                                 <option value="layer">Layer</option>
                                 <option value="uniform">Uniform</option>
                                 <option value="global">Global</option>
+                                <option value="performance">Performance</option>
                             </select>
                         </div>
                         <div class="flex items-center gap-2">
@@ -337,6 +374,8 @@
                             <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">1</kbd>-<kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">9</kbd> Recall scene 1..9</div>
                             <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">0</kbd> or <kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">B</kbd> Toggle blackout</div>
                             <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">Shift+B</kbd> MIDI Panic</div>
+                            <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">G</kbd> Performance Guard</div>
+                            <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">Shift+G</kbd> Next performance profile</div>
                             <div><kbd class="px-1.5 py-0.5 border border-slate-700 rounded bg-slate-950">T</kbd> Tap tempo</div>
                         </div>
                     </div>
@@ -390,7 +429,9 @@
                     <span id="editor-layer-name" class="text-[10px] text-slate-400 bg-slate-800 px-2 py-1 rounded font-mono">Layer</span>
                 </div>
                 <div class="flex gap-2">
+                    <span id="editor-status" class="text-[10px] text-slate-500 font-mono px-2 py-1.5 truncate max-w-80">Ready</span>
                     <button id="editor-cancel-btn" class="text-[10px] px-3 py-1.5 rounded text-slate-300 hover:bg-slate-700">ESC</button>
+                    <button id="editor-live-apply-btn" class="text-[10px] px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-bold">APPLY LIVE (CTRL+ENTER)</button>
                     <button id="editor-save-btn" class="text-[10px] px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">APPLY (CTRL+S)</button>
                 </div>
             </div>
@@ -446,7 +487,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="grid grid-cols-12 gap-4 items-start border-t border-slate-800/50 pt-3">
                 <!-- Main Controls -->
                 <div class="col-span-4 space-y-3 border-r border-slate-800/50 pr-4">

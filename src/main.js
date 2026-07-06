@@ -19,6 +19,7 @@ import { AppState } from './core/app-state.js';
 import { AudioAnalyzer } from './audio/audio-analyzer.js';
 import { Renderer } from './renderer/renderer.js';
 import { BpmSync } from './sync/bpm-sync.js';
+import { PerformanceGuard } from './performance/performance-guard.js';
 import { MidiManager } from './midi/midi-manager.js';
 import { MidiBindings } from './midi/midi-bindings.js';
 import { MidiConfigUI } from './midi/midi-config-ui.js';
@@ -50,6 +51,7 @@ function boot() {
     const audio = new AudioAnalyzer();
     const renderer = new Renderer(bus, state);
     const bpmSync = new BpmSync(bus, state, renderer.clock);
+    const performanceGuard = new PerformanceGuard(bus, state, { renderer });
     const toast = new Toast(bus);
     const debugPanel = new DebugPanel(bus, state);
 
@@ -105,6 +107,7 @@ function boot() {
     // ── 4. Init UI (binds DOM elements) ──────────────────────
     renderer.initUI();
     bpmSync.initUI();
+    performanceGuard.initUI();
     debugPanel.initUI(renderer.rendererLabel);
     debugPanel.installGlobalErrorHooks();
     sceneManager.initUI();
@@ -157,7 +160,7 @@ function boot() {
     window.vjApp = {
         bus, state, audio, renderer, bpmSync, midiManager,
         layerManager, sceneManager, editorController, projectIO,
-        debugPanel, uiController
+        performanceGuard, debugPanel, uiController
     };
 
     window.render_game_to_text = () => {
@@ -193,6 +196,14 @@ function boot() {
                 toIdx: crossfade.toIdx,
                 mix: Number(crossfade.mix.toFixed(3)),
                 targetLayerIds: crossfade.layersB.map((layer) => layer.id)
+            },
+            performance: {
+                guardEnabled: state.performance.guardEnabled,
+                profile: state.performance.profile,
+                targetFps: state.performance.targetFps,
+                renderScale: Number(state.performance.renderScale.toFixed(2)),
+                freezeHiddenLayers: state.performance.freezeHiddenLayers,
+                status: state.performance.status
             }
         });
     };

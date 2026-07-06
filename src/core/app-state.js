@@ -18,6 +18,22 @@ export class AppState {
         this.dprMode = localStorage.getItem('vj_dpr') || '1';
         this.preserveDrawingBuffer = localStorage.getItem('vj_preserve_buffer') === '1';
 
+        // --- Performance Guard ---
+        const savedTargetFps = Number(localStorage.getItem('vj_perf_target_fps'));
+        const savedProfile = localStorage.getItem('vj_perf_profile');
+        this.performance = {
+            guardEnabled: localStorage.getItem('vj_perf_guard') !== '0',
+            targetFps: [30, 45, 60].includes(savedTargetFps) ? savedTargetFps : 60,
+            profile: ['quality', 'balanced', 'performance'].includes(savedProfile) ? savedProfile : 'balanced',
+            renderScale: 1,
+            adaptiveLevel: 0,
+            thumbnailIntervalMs: 180,
+            freezeHiddenLayers: localStorage.getItem('vj_perf_freeze_hidden') === '1',
+            status: 'nominal',
+            avgFrameMs: 16.67,
+            lastReason: 'init'
+        };
+
         // --- MIDI ---
         // map: legacy CC→uniform map, kept for backwards compatibility.
         //      Format: { "layerId::u_key": ccNumber }
@@ -88,9 +104,9 @@ export class AppState {
         this.soloLayerId = null;
 
         // --- Persistence ---
-        // Storage key is versioned; v1.1 adds bindings/clock/blackout etc.
-        this.projectStorageKey = 'vj_project_autosave_v1_1';
-        this.legacyStorageKeys = ['vj_project_autosave_v0_5'];
+        // Storage key is versioned; v1.2 adds Performance Guard prefs.
+        this.projectStorageKey = 'vj_project_autosave_v1_2';
+        this.legacyStorageKeys = ['vj_project_autosave_v1_1', 'vj_project_autosave_v0_5'];
         this.storageErrorShown = false;
 
         // --- Debug ---

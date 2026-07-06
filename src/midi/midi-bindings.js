@@ -28,6 +28,8 @@
  *   bpm:tap         {}
  *   app:blackout    { active }
  *   app:panic       {}
+ *   performance:guard-toggle {}
+ *   performance:profile-step { delta }
  *   project:autosave (when state changes via dispatch)
  */
 
@@ -291,6 +293,12 @@ export class MidiBindings {
             }
             case 'app.panic':
                 if (edgeOn) { this._bus.emit('app:panic', {}); return true; }
+                return false;
+            case 'performance.guard.toggle':
+                if (edgeOn) { this._bus.emit('performance:guard-toggle', {}); return true; }
+                return false;
+            case 'performance.profile.next':
+                if (edgeOn) { this._bus.emit('performance:profile-step', { delta: 1 }); return true; }
                 return false;
             default:
                 return false;
